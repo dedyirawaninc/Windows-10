@@ -15,4 +15,5 @@ if ($currentPath -notlike "*$pythonScripts*") {
   Write-Host "$pythonScripts paths already exist in PATH."
 }
 
+# If error try to close and reopen vscode
 aws --version

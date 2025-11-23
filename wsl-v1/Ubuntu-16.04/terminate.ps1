@@ -1,0 +1,1 @@
+wsl --terminate Ubuntu-16.04

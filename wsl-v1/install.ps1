@@ -1,0 +1,1 @@
+Start-Process powershell -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File "".\wsl-v1\dism.ps1"""

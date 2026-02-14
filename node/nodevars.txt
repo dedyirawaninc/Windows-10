@@ -1,0 +1,12 @@
+rem setup enviroment variable in file
+set "ANDROID_HOME=F:\VBoxShared\Programs\Android\android-sdk-windows"
+set "ANDROID_HOME=%ANDROID_HOME%;F:\VBoxShared\Programs\Android\android-sdk-windows\build-tools"
+set "ANDROID_HOME=%ANDROID_HOME%;F:\VBoxShared\Programs\Android\android-sdk-windows\platform-tools"
+set "ANDROID_HOME=%ANDROID_HOME%;F:\VBoxShared\Programs\Android\android-sdk-windows\tools"
+set "GRADLE_HOME=F:\Gradle49"
+set "GRADLE_HOME=%GRADLE_HOME%;F:\Gradle49\bin"
+set "JAVA_HOME=C:\Program Files\Java\jdk1.8.0_161"
+set "PATH=%PATH%;%ADB_HOME%;%ANDROID_HOME%;%GRADLE_HOME%;%JAVA_HOME%"
+
+setup enviroment variable in file
+C:\Program Files\nodejs\nodevars.bat

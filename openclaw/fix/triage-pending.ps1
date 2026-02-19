@@ -5,6 +5,7 @@ param(
   [string]$RequestId,
   [switch]$ApproveLatest,
   [string]$TargetNode = "WD11PRO64",
+  [switch]$BootstrapExecAllowlist = $true,
   [int]$WaitTimeoutSeconds = 60,
   [int]$PollIntervalSeconds = 3
 )
@@ -15,6 +16,42 @@ function Get-AuthArgs {
   if ($Password) { return @("--password", $Password) }
   if ($Token) { return @("--token", $Token) }
   throw "Provide -Token or -Password."
+}
+
+function Add-ExecAllowlistDefaults {
+  param(
+    [string]$Node,
+    [string]$Url,
+    [array]$AuthArgs
+  )
+
+  if (-not $BootstrapExecAllowlist) { return }
+
+  Write-Host "[post] Bootstrapping exec allowlist defaults for '$Node'..." -ForegroundColor Cyan
+  $patterns = @(
+    "C:\\Windows\\System32\\cmd.exe",
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "C:\\Program Files\\nodejs\\node.exe",
+    "C:\\Python314\\python.exe"
+  )
+
+  foreach ($pattern in $patterns) {
+    $out = & cmd /c openclaw.cmd approvals allowlist add --gateway --node $Node --agent "*" --url $Url @AuthArgs "$pattern" --json 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "Allowlisted: $pattern" -ForegroundColor Green
+      continue
+    }
+
+    $text = ($out | Out-String)
+    if ($text -match "already exists|duplicate|already in allowlist") {
+      Write-Host "Already allowlisted: $pattern" -ForegroundColor DarkYellow
+      continue
+    }
+
+    Write-Host "Allowlist add failed for $pattern" -ForegroundColor Yellow
+    Write-Host $text -ForegroundColor DarkYellow
+  }
 }
 
 $authArgs = Get-AuthArgs
@@ -30,6 +67,9 @@ Write-Host "[1/2] Checking pending node pairing requests..." -ForegroundColor Cy
 if ($RequestId) {
   Write-Host "[2/2] Approving request id: $RequestId" -ForegroundColor Cyan
   & cmd /c openclaw.cmd nodes approve $RequestId --url $GatewayUrl @authArgs --json
+  if ($LASTEXITCODE -eq 0) {
+    Add-ExecAllowlistDefaults -Node $TargetNode -Url $GatewayUrl -AuthArgs $authArgs
+  }
   exit $LASTEXITCODE
 }
 
@@ -78,6 +118,7 @@ if ($ApproveLatest) {
 
     if ($approveCode -eq 0) {
       $approveOut
+      Add-ExecAllowlistDefaults -Node $TargetNode -Url $GatewayUrl -AuthArgs $authArgs
       exit 0
     }
 

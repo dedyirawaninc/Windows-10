@@ -3,6 +3,7 @@ $gatewayHost = "192.168.100.107"
 $gatewayPort = 8789
 $gatewayUrl = "ws://$gatewayHost`:$gatewayPort"
 $displayName = $env:COMPUTERNAME
+$nodeId = "$($env:COMPUTERNAME)-PAIRING"
 $targetNode = $displayName
 $gatewayToken = "4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781"
 $oc = "$env:USERPROFILE\.openclaw"
@@ -89,7 +90,7 @@ Get-ChildItem $oc -Recurse -File -ErrorAction SilentlyContinue |
 
 Write-Host "[5/6] Installing and starting node service (background)..." -ForegroundColor Cyan
 cmd /c openclaw.cmd node install --force --host $gatewayHost --port $gatewayPort --display-name $displayName
-cmd /c openclaw.cmd node restart
+cmd /c openclaw.cmd node run --host $gatewayHost --port $gatewayPort --display-name $displayName --node-id $nodeId
 
 Approve-LatestPendingNode
 

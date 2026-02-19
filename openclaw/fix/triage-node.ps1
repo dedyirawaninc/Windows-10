@@ -1,3 +1,7 @@
+param(
+  [switch]$SingleShot
+)
+
 $gatewayHost = "192.168.100.107"
 $gatewayPort = 8789
 $displayName = $env:COMPUTERNAME
@@ -14,6 +18,9 @@ Test-NetConnection $gatewayHost -Port $gatewayPort
 
 Write-Host "[3/3] Running node in foreground with debug logs..." -ForegroundColor Cyan
 Write-Host "If you see 'pairing required', approve this node from an authorized client using 'openclaw nodes pending/approve'." -ForegroundColor Yellow
+if ($SingleShot) {
+  Write-Host "Single-shot mode enabled: this run will not auto-retry." -ForegroundColor Yellow
+}
 
 $env:DEBUG = "openclaw:*"
 $env:OPENCLAW_GATEWAY_URL = "ws://$gatewayHost`:$gatewayPort"

@@ -6,16 +6,81 @@ param(
   [switch]$ApproveLatest,
   [string]$TargetNode = "WD11PRO64",
   [switch]$BootstrapExecAllowlist = $true,
+  [switch]$SingleShot = $false,
   [int]$WaitTimeoutSeconds = 60,
   [int]$PollIntervalSeconds = 3
 )
 
 $ErrorActionPreference = "Stop"
+# Keep native stderr as regular output so we can parse gateway errors ourselves.
+if ($null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+  $PSNativeCommandUseErrorActionPreference = $false
+}
+
+$nodeExe = (Get-Command node -ErrorAction Stop).Source
+$openclawMjs = Join-Path $env:APPDATA "npm\node_modules\openclaw\openclaw.mjs"
+if (-not (Test-Path $openclawMjs)) {
+  throw "OpenClaw entrypoint not found: $openclawMjs"
+}
+
+if (-not $Token -and $env:OPENCLAW_ADMIN_TOKEN) { $Token = $env:OPENCLAW_ADMIN_TOKEN }
+if (-not $Password -and $env:OPENCLAW_ADMIN_PASSWORD) { $Password = $env:OPENCLAW_ADMIN_PASSWORD }
 
 function Get-AuthArgs {
   if ($Password) { return @("--password", $Password) }
   if ($Token) { return @("--token", $Token) }
-  throw "Provide -Token or -Password."
+  throw "Provide -Token or -Password (or set OPENCLAW_ADMIN_TOKEN / OPENCLAW_ADMIN_PASSWORD)."
+}
+
+function Invoke-OpenClawCapture {
+  param(
+    [string[]]$OpenClawArgs
+  )
+
+  $stdoutFile = [System.IO.Path]::GetTempFileName()
+  $stderrFile = [System.IO.Path]::GetTempFileName()
+  try {
+    $proc = Start-Process -FilePath $nodeExe `
+      -ArgumentList (@($openclawMjs) + $OpenClawArgs) `
+      -NoNewWindow -Wait -PassThru `
+      -RedirectStandardOutput $stdoutFile `
+      -RedirectStandardError $stderrFile
+
+    $stdout = ""
+    $stderr = ""
+    if (Test-Path $stdoutFile) { $stdout = Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue }
+    if (Test-Path $stderrFile) { $stderr = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue }
+    $text = @($stdout, $stderr) -join ""
+
+    return [pscustomobject]@{
+      ExitCode = $proc.ExitCode
+      Text = $text
+      Raw = $text
+    }
+  } finally {
+    Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Invoke-PendingJson {
+  param(
+    [string]$Url,
+    [array]$AuthArgs
+  )
+
+  $result = Invoke-OpenClawCapture -OpenClawArgs (@("nodes","pending","--url",$Url) + $AuthArgs + @("--json"))
+  $code = $result.ExitCode
+  $text = $result.Text
+
+  if ($code -ne 0 -and $text -match "pairing required") {
+    throw "Gateway rejected this auth context (1008 pairing required). Use an already-authorized admin token/password from gateway host or Control UI."
+  }
+
+  if ($code -ne 0) {
+    throw "nodes pending failed: $text"
+  }
+
+  return $text
 }
 
 function Add-ExecAllowlistDefaults {
@@ -37,13 +102,13 @@ function Add-ExecAllowlistDefaults {
   )
 
   foreach ($pattern in $patterns) {
-    $out = & cmd /c openclaw.cmd approvals allowlist add --gateway --node $Node --agent "*" --url $Url @AuthArgs "$pattern" --json 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $allow = Invoke-OpenClawCapture -OpenClawArgs (@("approvals","allowlist","add","--gateway","--node",$Node,"--agent","*","--url",$Url) + $AuthArgs + @($pattern,"--json"))
+    if ($allow.ExitCode -eq 0) {
       Write-Host "Allowlisted: $pattern" -ForegroundColor Green
       continue
     }
 
-    $text = ($out | Out-String)
+    $text = $allow.Text
     if ($text -match "already exists|duplicate|already in allowlist") {
       Write-Host "Already allowlisted: $pattern" -ForegroundColor DarkYellow
       continue
@@ -62,29 +127,35 @@ if (-not $RequestId -and -not $ApproveLatest) {
 }
 
 Write-Host "[1/2] Checking pending node pairing requests..." -ForegroundColor Cyan
-& cmd /c openclaw.cmd nodes pending --url $GatewayUrl @authArgs --json
+Invoke-PendingJson -Url $GatewayUrl -AuthArgs $authArgs | Write-Host
 
 if ($RequestId) {
   Write-Host "[2/2] Approving request id: $RequestId" -ForegroundColor Cyan
-  & cmd /c openclaw.cmd nodes approve $RequestId --url $GatewayUrl @authArgs --json
-  if ($LASTEXITCODE -eq 0) {
+  $approve = Invoke-OpenClawCapture -OpenClawArgs (@("nodes","approve",$RequestId,"--url",$GatewayUrl) + $authArgs + @("--json"))
+  if ($approve.ExitCode -eq 0) {
     Add-ExecAllowlistDefaults -Node $TargetNode -Url $GatewayUrl -AuthArgs $authArgs
   }
-  exit $LASTEXITCODE
+  exit $approve.ExitCode
 }
 
 if ($ApproveLatest) {
   Write-Host "[2/2] Approving pending request for target node '$TargetNode' (newest first, with mismatch fallback)..." -ForegroundColor Cyan
   $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
   $candidates = @()
+  $attempt = 0
   while ((Get-Date) -lt $deadline) {
-    $pendingJson = & cmd /c openclaw.cmd nodes pending --url $GatewayUrl @authArgs --json
+    $attempt++
+    $pendingJson = Invoke-PendingJson -Url $GatewayUrl -AuthArgs $authArgs
     if (-not $pendingJson) { throw "No response from pending query." }
 
     $pending = $pendingJson | ConvertFrom-Json
     if ($pending.pending -and $pending.pending.Count -gt 0) {
       $candidates = $pending.pending | Sort-Object { $_.requestedAtMs } -Descending
       break
+    }
+
+    if ($SingleShot) {
+      throw "No pending requests found for single-shot run. Keep triage-node running and retry immediately."
     }
 
     Write-Host "No pending pair yet. Waiting $PollIntervalSeconds seconds..." -ForegroundColor Yellow
@@ -113,8 +184,9 @@ if ($ApproveLatest) {
     if (-not $candidateId) { continue }
 
     Write-Host "Trying approve requestId: $candidateId" -ForegroundColor Cyan
-    $approveOut = & cmd /c openclaw.cmd nodes approve $candidateId --url $GatewayUrl @authArgs --json 2>&1
-    $approveCode = $LASTEXITCODE
+    $approve = Invoke-OpenClawCapture -OpenClawArgs (@("nodes","approve",$candidateId,"--url",$GatewayUrl) + $authArgs + @("--json"))
+    $approveOut = $approve.Raw
+    $approveCode = $approve.ExitCode
 
     if ($approveCode -eq 0) {
       $approveOut

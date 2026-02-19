@@ -5,7 +5,7 @@ param(
 $gatewayHost = "192.168.100.107"
 $gatewayPort = 8789
 $displayName = $env:COMPUTERNAME
-$gatewayToken = "4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781"
+$gatewayToken = "wmwz6b-GaPZj8ExQrsUXeeABd9MgL4E3Yzp5S6jrlVetx-ROKdyoW7hZ4O9Eclnc"
 $nodeId = "$($env:COMPUTERNAME)-PAIRING"
 
 Write-Host "[1/3] Checking running OpenClaw node process..." -ForegroundColor Cyan

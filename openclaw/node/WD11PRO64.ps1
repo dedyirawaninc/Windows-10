@@ -5,7 +5,7 @@ $gatewayUrl = "ws://$gatewayHost`:$gatewayPort"
 $displayName = $env:COMPUTERNAME
 $nodeId = "$($env:COMPUTERNAME)-PAIRING"
 $targetNode = $displayName
-$gatewayToken = "4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781"
+$gatewayToken = "wmwz6b-GaPZj8ExQrsUXeeABd9MgL4E3Yzp5S6jrlVetx-ROKdyoW7hZ4O9Eclnc"
 $oc = "$env:USERPROFILE\.openclaw"
 $bak = "$env:USERPROFILE\.openclaw-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
 

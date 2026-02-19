@@ -1,6 +1,6 @@
 param(
   [string]$GatewayUrl = "ws://192.168.100.107:8789",
-  [string]$Token = "4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781",
+  [string]$Token = "wmwz6b-GaPZj8ExQrsUXeeABd9MgL4E3Yzp5S6jrlVetx-ROKdyoW7hZ4O9Eclnc",
   [string]$Password,
   [string]$RequestId,
   [switch]$ApproveLatest,

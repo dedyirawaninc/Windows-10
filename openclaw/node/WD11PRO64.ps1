@@ -1,23 +1,28 @@
-# stop scheduled task + kill node
+# stop task/service + kill node process
 
-schtasks /End /TN "OpenClaw Node" 2>$null
+$taskName = "OpenClaw Node"
+$gatewayHost = "192.168.100.107"
+$gatewayPort = 8789
+$displayName = $env:COMPUTERNAME
+$nodeId = "$($env:COMPUTERNAME)-$(Get-Date -Format yyyyMMddHHmmss)"
+
+schtasks /End /TN $taskName 2>$null
 Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
+cmd /c openclaw.cmd node uninstall 2>$null
 
-# clear stale node identity (backup first)
+# clear stale pairing identity (backup first), but keep node runtime files
 
-$oc="$env:USERPROFILE\.openclaw"
-$bak="$env:USERPROFILE\.openclaw-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$oc = "$env:USERPROFILE\.openclaw"
+$bak = "$env:USERPROFILE\.openclaw-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
 
 if (Test-Path $oc) { Copy-Item $oc $bak -Recurse -Force }
 
 Get-ChildItem $oc -Recurse -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -match 'pair|token|identity|node' } |
+  Where-Object { $_.Name -match 'pair|token|identity' } |
   Remove-Item -Force -ErrorAction SilentlyContinue
 
-# run node foreground once with explicit gateway auth
+# reinstall service with a fresh node id (clears old pairing token)
 
-$env:OPENCLAW_GATEWAY_URL="ws://192.168.100.107:8789"
-$env:OPENCLAW_GATEWAY_TOKEN="4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781"
-openclaw node run --host 192.168.100.107 --port 8789 --display-name WD11PRO64
-openclaw node install --host 192.168.100.107 --port 8789 --display-name "WD11PRO64"
-openclaw node status
+cmd /c openclaw.cmd node install --force --host $gatewayHost --port $gatewayPort --display-name $displayName --node-id $nodeId
+cmd /c openclaw.cmd node restart
+cmd /c openclaw.cmd node status --json

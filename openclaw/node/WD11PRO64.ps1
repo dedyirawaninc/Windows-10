@@ -3,8 +3,8 @@ $gatewayHost = "192.168.100.107"
 $gatewayPort = 8789
 $gatewayUrl = "ws://$gatewayHost`:$gatewayPort"
 $displayName = $env:COMPUTERNAME
+$targetNode = $displayName
 $gatewayToken = "4df27d5c3e80a68873b43bc44a7fd1bed4bea33c0c870781"
-$nodeId = "$($env:COMPUTERNAME)-$(Get-Date -Format yyyyMMddHHmmss)"
 $oc = "$env:USERPROFILE\.openclaw"
 $bak = "$env:USERPROFILE\.openclaw-backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
 
@@ -18,7 +18,7 @@ function Get-AuthArgs {
 
 function Approve-LatestPendingNode {
   $authArgs = Get-AuthArgs
-  Write-Host "[5/6] Checking pending node pairing requests..." -ForegroundColor Cyan
+  Write-Host "[5/6] Checking pending node pairing requests for '$targetNode'..." -ForegroundColor Cyan
   $pendingJson = & cmd /c openclaw.cmd nodes pending --url $gatewayUrl @authArgs --json
 
   if (-not $pendingJson) {
@@ -32,15 +32,40 @@ function Approve-LatestPendingNode {
     return
   }
 
-  $latest = $pending.pending | Sort-Object { $_.requestedAtMs } -Descending | Select-Object -First 1
-  $requestId = $latest.requestId
-  if (-not $requestId) {
-    Write-Host "Pending requests found but no requestId available to approve." -ForegroundColor Yellow
-    return
+  $candidates = $pending.pending | Sort-Object { $_.requestedAtMs } -Descending
+  $targetCandidates = @()
+  foreach ($candidate in $candidates) {
+    $blob = ($candidate | ConvertTo-Json -Compress -Depth 8)
+    if ($blob -match [Regex]::Escape($targetNode)) {
+      $targetCandidates += $candidate
+    }
+  }
+  if (-not $targetCandidates -or $targetCandidates.Count -eq 0) {
+    Write-Host "No pending request matched '$targetNode'. Falling back to all pending requests." -ForegroundColor Yellow
+    $targetCandidates = $candidates
   }
 
-  Write-Host "Approving latest pending request: $requestId" -ForegroundColor Cyan
-  & cmd /c openclaw.cmd nodes approve $requestId --url $gatewayUrl @authArgs --json
+  foreach ($candidate in $targetCandidates) {
+    $requestId = $candidate.requestId
+    if (-not $requestId) { continue }
+
+    Write-Host "Trying approval requestId: $requestId" -ForegroundColor Cyan
+    $approveOut = & cmd /c openclaw.cmd nodes approve $requestId --url $gatewayUrl @authArgs --json 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $approveOut
+      return
+    }
+
+    $approveText = ($approveOut | Out-String)
+    if ($approveText -match "approval id does not match request") {
+      Write-Host "Approval mismatch for requestId $requestId, trying next..." -ForegroundColor Yellow
+      continue
+    }
+
+    Write-Host "Approval failed for requestId ${requestId}: $approveText" -ForegroundColor Yellow
+  }
+
+  Write-Host "All candidate approvals failed. Keep node session alive and retry." -ForegroundColor Yellow
 }
 
 Write-Host "[1/5] Checking running OpenClaw node process..." -ForegroundColor Cyan
@@ -63,7 +88,7 @@ Get-ChildItem $oc -Recurse -File -ErrorAction SilentlyContinue |
   Remove-Item -Force -ErrorAction SilentlyContinue
 
 Write-Host "[5/6] Installing and starting node service (background)..." -ForegroundColor Cyan
-cmd /c openclaw.cmd node install --force --host $gatewayHost --port $gatewayPort --display-name $displayName --node-id $nodeId
+cmd /c openclaw.cmd node install --force --host $gatewayHost --port $gatewayPort --display-name $displayName
 cmd /c openclaw.cmd node restart
 
 Approve-LatestPendingNode

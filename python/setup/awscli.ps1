@@ -1,19 +1,44 @@
-# Add pyenv-win paths to user PATH environment variable
-$scriptRoot = "$env:USERPROFILE\.pyenv\pyenv-win"
-$scriptPath = "$scriptRoot\Scripts"
+param(
+  [switch]$Quiet
+)
 
-pip install awscli --upgrade --user
-python -m site --user-base
+$ErrorActionPreference = "Stop"
 
-# Get current user PATH
-$currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+  [Security.Principal.WindowsBuiltInRole]::Administrator
+)
 
-# Add shims path if not already present
-if ($currentPath -notlike "*$scriptPath*") {
-  [Environment]::SetEnvironmentVariable("PATH",$scriptPath + [Environment]::GetEnvironmentVariable("PATH", "User"),"User")
-} else {
-  Write-Host "$scriptPath paths already exist in PATH."
+if (-not $isAdmin) {
+  Write-Warning "AWS CLI v2 requires Administrator rights on Windows."
+  Write-Host "Open PowerShell as Administrator, then run:"
+  Write-Host "  cd `"$PWD`""
+  Write-Host "  powershell -ExecutionPolicy Bypass -File `".\python\setup\awscli.ps1`""
+  exit 1
 }
 
-# If error try to close and reopen vscode
+$uri = "https://awscli.amazonaws.com/AWSCLIV2.msi"
+$installer = Join-Path $env:TEMP "AWSCLIV2.msi"
+
+Write-Host "Downloading AWS CLI v2 installer..."
+Invoke-WebRequest -Uri $uri -UseBasicParsing -OutFile $installer
+
+$msiArgs = @("/i", "`"$installer`"")
+if ($Quiet) {
+  $msiArgs += "/qn"
+} else {
+  $msiArgs += "/passive"
+}
+
+Write-Host "Installing AWS CLI v2..."
+$process = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
+if ($process.ExitCode -ne 0) {
+  Write-Error "AWS CLI installer failed with exit code $($process.ExitCode)."
+  exit $process.ExitCode
+}
+
+$machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$env:Path = "$machinePath;$userPath"
+
+Write-Host "AWS CLI installed successfully."
 aws --version

@@ -18,11 +18,17 @@ if (-not $isAdmin) {
 
 $uri = "https://awscli.amazonaws.com/AWSCLIV2.msi"
 $installer = Join-Path $env:TEMP "AWSCLIV2.msi"
+$log = Join-Path $env:TEMP "AWSCLIV2-install.log"
+
+$existingAws = Get-Command aws -ErrorAction SilentlyContinue
+if ($existingAws) {
+  Write-Host "Current aws command: $($existingAws.Source)"
+}
 
 Write-Host "Downloading AWS CLI v2 installer..."
 Invoke-WebRequest -Uri $uri -UseBasicParsing -OutFile $installer
 
-$msiArgs = @("/i", "`"$installer`"")
+$msiArgs = @("/i", "`"$installer`"", "/L*v", "`"$log`"")
 if ($Quiet) {
   $msiArgs += "/qn"
 } else {
@@ -32,6 +38,13 @@ if ($Quiet) {
 Write-Host "Installing AWS CLI v2..."
 $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
 if ($process.ExitCode -ne 0) {
+  Write-Host "Installer log: $log"
+  if (Test-Path $log) {
+    Write-Host "Recent MSI errors:"
+    Select-String -Path $log -Pattern "Return value 3|Error [0-9]+|MSI .* failed|Installation failed" |
+      Select-Object -Last 20 |
+      ForEach-Object { Write-Host "  $($_.Line.Trim())" }
+  }
   Write-Error "AWS CLI installer failed with exit code $($process.ExitCode)."
   exit $process.ExitCode
 }
